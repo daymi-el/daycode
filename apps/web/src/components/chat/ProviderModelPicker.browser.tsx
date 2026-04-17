@@ -134,6 +134,7 @@ async function mountPicker(props: {
   model: string;
   lockedProvider: ProviderKind | null;
   providers?: ReadonlyArray<ServerProvider>;
+  showComingSoonModelOptions?: boolean;
   triggerVariant?: "ghost" | "outline";
 }) {
   const host = document.createElement("div");
@@ -153,6 +154,9 @@ async function mountPicker(props: {
       lockedProvider={props.lockedProvider}
       providers={providers}
       modelOptionsByProvider={modelOptionsByProvider}
+      {...(props.showComingSoonModelOptions !== undefined
+        ? { showComingSoonModelOptions: props.showComingSoonModelOptions }
+        : {})}
       triggerVariant={props.triggerVariant}
       onProviderModelChange={onProviderModelChange}
     />,
@@ -239,6 +243,40 @@ describe("ProviderModelPicker", () => {
     }
   });
 
+  it("keeps the root popup at least as wide as the trigger", async () => {
+    const mounted = await mountPicker({
+      provider: "claudeAgent",
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+    });
+
+    try {
+      const trigger = page.getByRole("button");
+      await trigger.click();
+
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").toContain("Codex");
+      });
+
+      const triggerElement = document.querySelector("button[data-chat-provider-model-picker]");
+      if (!(triggerElement instanceof HTMLElement)) {
+        throw new Error("Expected picker trigger button to be rendered.");
+      }
+
+      const popupElement = document.querySelector<HTMLElement>('[data-slot="menu-popup"]');
+      if (!(popupElement instanceof HTMLElement)) {
+        throw new Error("Expected picker popup to be rendered.");
+      }
+
+      const triggerRect = triggerElement.getBoundingClientRect();
+      const popupRect = popupElement.getBoundingClientRect();
+
+      expect(popupRect.width + 1).toBeGreaterThanOrEqual(triggerRect.width);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("shows models directly when the provider is locked mid-thread", async () => {
     const mounted = await mountPicker({
       provider: "claudeAgent",
@@ -254,6 +292,51 @@ describe("ProviderModelPicker", () => {
         expect(text).toContain("Claude Sonnet 4.6");
         expect(text).toContain("Claude Haiku 4.5");
         expect(text).not.toContain("Codex");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("hides coming-soon providers by default", async () => {
+    const mounted = await mountPicker({
+      provider: "codex",
+      model: "gpt-5-codex",
+      lockedProvider: null,
+    });
+
+    try {
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        const text = document.body.textContent ?? "";
+        expect(text).not.toContain("Cursor");
+        expect(text).not.toContain("OpenCode");
+        expect(text).not.toContain("Gemini");
+        expect(text).not.toContain("Coming soon");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("shows coming-soon providers when explicitly enabled", async () => {
+    const mounted = await mountPicker({
+      provider: "codex",
+      model: "gpt-5-codex",
+      lockedProvider: null,
+      showComingSoonModelOptions: true,
+    });
+
+    try {
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        const text = document.body.textContent ?? "";
+        expect(text).toContain("Cursor");
+        expect(text).toContain("OpenCode");
+        expect(text).toContain("Gemini");
+        expect(text).toContain("Coming soon");
       });
     } finally {
       await mounted.cleanup();

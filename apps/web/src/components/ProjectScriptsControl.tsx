@@ -1,4 +1,5 @@
 import type {
+  ProjectPackageJsonDescriptor,
   ProjectScript,
   ProjectScriptIcon,
   ResolvedKeybindingsConfig,
@@ -17,16 +18,16 @@ import {
 import React, { type FormEvent, type KeyboardEvent, useCallback, useMemo, useState } from "react";
 
 import {
-  keybindingValueForCommand,
   decodeProjectScriptKeybindingRule,
+  keybindingValueForCommand,
 } from "~/lib/projectScriptKeybindings";
+import { isMacPlatform } from "~/lib/utils";
+import { shortcutLabelForCommand } from "~/keybindings";
 import {
   commandForProjectScript,
   nextProjectScriptId,
   primaryProjectScript,
 } from "~/projectScripts";
-import { shortcutLabelForCommand } from "~/keybindings";
-import { isMacPlatform } from "~/lib/utils";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -37,6 +38,7 @@ import {
   AlertDialogTitle,
 } from "./ui/alert-dialog";
 import { Button } from "./ui/button";
+import { Checkbox } from "./ui/checkbox";
 import {
   Dialog,
   DialogDescription,
@@ -51,6 +53,8 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Menu, MenuItem, MenuPopup, MenuShortcut, MenuTrigger } from "./ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
+import { ScrollArea } from "./ui/scroll-area";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { Switch } from "./ui/switch";
 import { Textarea } from "./ui/textarea";
 
@@ -78,6 +82,13 @@ function ScriptIcon({
   return <PlayIcon className={className} />;
 }
 
+function packageJsonDescription(entry: ProjectPackageJsonDescriptor): string {
+  const parts = [entry.packageName, entry.packageManager].filter(
+    (value): value is string => value !== null && value.length > 0,
+  );
+  return parts.join(" · ");
+}
+
 export interface NewProjectScriptInput {
   name: string;
   command: string;
@@ -94,6 +105,11 @@ interface ProjectScriptsControlProps {
   onAddScript: (input: NewProjectScriptInput) => Promise<void> | void;
   onUpdateScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void> | void;
   onDeleteScript: (scriptId: string) => Promise<void> | void;
+  onLoadPackageJsonScripts: () => Promise<ProjectPackageJsonDescriptor[]>;
+  onImportPackageJsonScripts: (input: {
+    packageJson: ProjectPackageJsonDescriptor;
+    scriptNames: string[];
+  }) => Promise<void> | void;
 }
 
 function normalizeShortcutKeyToken(key: string): string | null {
@@ -155,8 +171,11 @@ export default function ProjectScriptsControl({
   onAddScript,
   onUpdateScript,
   onDeleteScript,
+  onLoadPackageJsonScripts,
+  onImportPackageJsonScripts,
 }: ProjectScriptsControlProps) {
   const addScriptFormId = React.useId();
+  const importScriptFormId = React.useId();
   const [editingScriptId, setEditingScriptId] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [name, setName] = useState("");
@@ -167,6 +186,15 @@ export default function ProjectScriptsControl({
   const [keybinding, setKeybinding] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importPackageJsons, setImportPackageJsons] = useState<ProjectPackageJsonDescriptor[]>([]);
+  const [selectedImportPackagePath, setSelectedImportPackagePath] = useState("");
+  const [selectedImportScriptNames, setSelectedImportScriptNames] = useState<Set<string>>(
+    new Set(),
+  );
+  const [importValidationError, setImportValidationError] = useState<string | null>(null);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importPending, setImportPending] = useState(false);
 
   const primaryScript = useMemo(() => {
     if (preferredScriptId) {
@@ -175,6 +203,13 @@ export default function ProjectScriptsControl({
     }
     return primaryProjectScript(scripts);
   }, [preferredScriptId, scripts]);
+  const selectedImportPackage = useMemo(
+    () =>
+      importPackageJsons.find((entry) => entry.relativePath === selectedImportPackagePath) ??
+      importPackageJsons[0] ??
+      null,
+    [importPackageJsons, selectedImportPackagePath],
+  );
   const isEditing = editingScriptId !== null;
   const dropdownItemClassName =
     "data-highlighted:bg-transparent data-highlighted:text-foreground hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground data-highlighted:hover:bg-accent data-highlighted:hover:text-accent-foreground data-highlighted:focus-visible:bg-accent data-highlighted:focus-visible:text-accent-foreground";
@@ -247,6 +282,40 @@ export default function ProjectScriptsControl({
     setDialogOpen(true);
   };
 
+  const setSelectedImportPackage = useCallback(
+    (relativePath: string | null, packageJsons: ProjectPackageJsonDescriptor[]) => {
+      setSelectedImportPackagePath(relativePath ?? "");
+      const packageJson =
+        packageJsons.find((entry) => entry.relativePath === (relativePath ?? "")) ??
+        packageJsons[0] ??
+        null;
+      setSelectedImportScriptNames(
+        new Set(packageJson?.scripts.map((script) => script.name) ?? []),
+      );
+    },
+    [],
+  );
+
+  const openImportDialog = useCallback(async () => {
+    setImportDialogOpen(true);
+    setImportValidationError(null);
+    setImportLoading(true);
+    try {
+      const packageJsons = await onLoadPackageJsonScripts();
+      setImportPackageJsons(packageJsons);
+      setSelectedImportPackage(packageJsons[0]?.relativePath ?? "", packageJsons);
+    } catch (error) {
+      setImportPackageJsons([]);
+      setSelectedImportPackagePath("");
+      setSelectedImportScriptNames(new Set());
+      setImportValidationError(
+        error instanceof Error ? error.message : "Failed to load package.json files.",
+      );
+    } finally {
+      setImportLoading(false);
+    }
+  }, [onLoadPackageJsonScripts, setSelectedImportPackage]);
+
   const openEditDialog = (script: ProjectScript) => {
     setEditingScriptId(script.id);
     setName(script.name);
@@ -258,6 +327,48 @@ export default function ProjectScriptsControl({
     setValidationError(null);
     setDialogOpen(true);
   };
+
+  const toggleImportedScript = useCallback((scriptName: string) => {
+    setSelectedImportScriptNames((current) => {
+      const next = new Set(current);
+      if (next.has(scriptName)) {
+        next.delete(scriptName);
+      } else {
+        next.add(scriptName);
+      }
+      return next;
+    });
+  }, []);
+
+  const submitImportedScripts = useCallback(async () => {
+    if (!selectedImportPackage) {
+      setImportValidationError("Select a package.json.");
+      return;
+    }
+    const selectedScriptNames = selectedImportPackage.scripts
+      .map((script) => script.name)
+      .filter((scriptName) => selectedImportScriptNames.has(scriptName));
+    if (selectedScriptNames.length === 0) {
+      setImportValidationError("Select at least one script to import.");
+      return;
+    }
+
+    setImportValidationError(null);
+    setImportPending(true);
+    try {
+      await onImportPackageJsonScripts({
+        packageJson: selectedImportPackage,
+        scriptNames: selectedScriptNames,
+      });
+      setImportDialogOpen(false);
+    } catch (error) {
+      setImportValidationError(
+        error instanceof Error ? error.message : "Failed to import actions.",
+      );
+    } finally {
+      setImportPending(false);
+    }
+  }, [onImportPackageJsonScripts, selectedImportPackage, selectedImportScriptNames]);
 
   const confirmDeleteScript = useCallback(() => {
     if (!editingScriptId) return;
@@ -314,7 +425,7 @@ export default function ProjectScriptsControl({
                         type="button"
                         variant="ghost"
                         size="icon-xs"
-                        className="absolute right-0 top-1/2 size-6 -translate-y-1/2 opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto group-focus-visible:opacity-100 group-focus-visible:pointer-events-auto"
+                        className="absolute right-0 top-1/2 size-6 -translate-y-1/2 opacity-0 pointer-events-none transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-visible:pointer-events-auto group-focus-visible:opacity-100"
                         aria-label={`Edit ${script.name}`}
                         onPointerDown={(event) => {
                           event.preventDefault();
@@ -332,6 +443,10 @@ export default function ProjectScriptsControl({
                   </MenuItem>
                 );
               })}
+              <MenuItem className={dropdownItemClassName} onClick={() => void openImportDialog()}>
+                <PlayIcon className="size-4" />
+                Import from package.json
+              </MenuItem>
               <MenuItem className={dropdownItemClassName} onClick={openAddDialog}>
                 <PlusIcon className="size-4" />
                 Add action
@@ -340,12 +455,32 @@ export default function ProjectScriptsControl({
           </Menu>
         </Group>
       ) : (
-        <Button size="xs" variant="outline" onClick={openAddDialog} title="Add action">
-          <PlusIcon className="size-3.5" />
-          <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
-            Add action
-          </span>
-        </Button>
+        <Group aria-label="Project scripts">
+          <Button size="xs" variant="outline" onClick={openAddDialog} title="Add action">
+            <PlusIcon className="size-3.5" />
+            <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
+              Add action
+            </span>
+          </Button>
+          <GroupSeparator className="hidden @3xl/header-actions:block" />
+          <Menu highlightItemOnHover={false}>
+            <MenuTrigger
+              render={<Button size="icon-xs" variant="outline" aria-label="Action options" />}
+            >
+              <ChevronDownIcon className="size-4" />
+            </MenuTrigger>
+            <MenuPopup align="end">
+              <MenuItem className={dropdownItemClassName} onClick={() => void openImportDialog()}>
+                <PlayIcon className="size-4" />
+                Import from package.json
+              </MenuItem>
+              <MenuItem className={dropdownItemClassName} onClick={openAddDialog}>
+                <PlusIcon className="size-4" />
+                Add action
+              </MenuItem>
+            </MenuPopup>
+          </Menu>
+        </Group>
       )}
 
       <Dialog
@@ -470,17 +605,163 @@ export default function ProjectScriptsControl({
                 Delete
               </Button>
             )}
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                setDialogOpen(false);
-              }}
-            >
+            <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
               Cancel
             </Button>
             <Button form={addScriptFormId} type="submit">
               {isEditing ? "Save changes" : "Save action"}
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+
+      <Dialog
+        onOpenChange={setImportDialogOpen}
+        onOpenChangeComplete={(open) => {
+          if (open) return;
+          setImportPackageJsons([]);
+          setSelectedImportPackagePath("");
+          setSelectedImportScriptNames(new Set());
+          setImportValidationError(null);
+          setImportLoading(false);
+          setImportPending(false);
+        }}
+        open={importDialogOpen}
+      >
+        <DialogPopup>
+          <DialogHeader>
+            <DialogTitle>Import Actions from package.json</DialogTitle>
+            <DialogDescription>
+              Choose a package.json in this project, then pick which scripts to import as actions.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel>
+            <form
+              id={importScriptFormId}
+              className="space-y-4"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void submitImportedScripts();
+              }}
+            >
+              <div className="space-y-1.5">
+                <Label htmlFor="import-package-json">package.json</Label>
+                {importLoading ? (
+                  <p className="text-sm text-muted-foreground">Loading package.json files…</p>
+                ) : importPackageJsons.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No importable package.json files were found in this project.
+                  </p>
+                ) : (
+                  <>
+                    <Select
+                      value={selectedImportPackage?.relativePath ?? ""}
+                      onValueChange={(value) =>
+                        setSelectedImportPackage(value ?? "", importPackageJsons)
+                      }
+                      items={importPackageJsons.map((entry) => ({
+                        value: entry.relativePath,
+                        label: entry.relativePath,
+                      }))}
+                    >
+                      <SelectTrigger className="w-full" aria-label="Select package.json">
+                        <SelectValue>{selectedImportPackage?.relativePath}</SelectValue>
+                      </SelectTrigger>
+                      <SelectPopup>
+                        {importPackageJsons.map((entry) => (
+                          <SelectItem key={entry.relativePath} value={entry.relativePath}>
+                            <span className="flex min-w-0 flex-col">
+                              <span className="truncate">{entry.relativePath}</span>
+                              <span className="truncate text-muted-foreground text-xs">
+                                {packageJsonDescription(entry)}
+                              </span>
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectPopup>
+                    </Select>
+                    {selectedImportPackage && (
+                      <p className="text-xs text-muted-foreground">
+                        {packageJsonDescription(selectedImportPackage)}
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+              {selectedImportPackage && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <Label>Scripts</Label>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="xs"
+                        onClick={() =>
+                          setSelectedImportScriptNames(
+                            new Set(selectedImportPackage.scripts.map((script) => script.name)),
+                          )
+                        }
+                      >
+                        Select all
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => setSelectedImportScriptNames(new Set())}
+                      >
+                        Clear
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="rounded-md border border-border/70">
+                    <ScrollArea className="h-64">
+                      <div className="space-y-1 p-2">
+                        {selectedImportPackage.scripts.map((script) => {
+                          const checked = selectedImportScriptNames.has(script.name);
+                          return (
+                            <label
+                              key={script.name}
+                              className="flex cursor-pointer items-start gap-3 rounded-md px-2 py-2 text-sm hover:bg-accent/40"
+                            >
+                              <Checkbox
+                                checked={checked}
+                                onCheckedChange={() => toggleImportedScript(script.name)}
+                              />
+                              <span className="min-w-0 flex-1">
+                                <span className="block font-medium">{script.name}</span>
+                                <span className="block truncate font-mono text-muted-foreground text-xs">
+                                  {script.command}
+                                </span>
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </ScrollArea>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {selectedImportScriptNames.size} of {selectedImportPackage.scripts.length}{" "}
+                    selected
+                  </p>
+                </div>
+              )}
+              {importValidationError && (
+                <p className="text-sm text-destructive">{importValidationError}</p>
+              )}
+            </form>
+          </DialogPanel>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setImportDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              form={importScriptFormId}
+              type="submit"
+              disabled={importLoading || importPending || importPackageJsons.length === 0}
+            >
+              {importPending ? "Importing…" : "Import actions"}
             </Button>
           </DialogFooter>
         </DialogPopup>

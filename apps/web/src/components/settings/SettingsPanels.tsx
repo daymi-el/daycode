@@ -98,6 +98,11 @@ const TIMESTAMP_FORMAT_LABELS = {
   "24-hour": "24-hour",
 } as const;
 
+const SIDEBAR_SIDE_LABELS = {
+  left: "Left",
+  right: "Right",
+} as const;
+
 type InstallProviderSettings = {
   provider: ProviderKind;
   title: string;
@@ -152,7 +157,7 @@ function getProviderSummary(provider: ServerProvider | undefined) {
     return {
       headline: "Disabled",
       detail:
-        provider.message ?? "This provider is installed but disabled for new sessions in T3 Code.",
+        provider.message ?? "This provider is installed but disabled for new sessions in daycode.",
     };
   }
   if (!provider.installed) {
@@ -371,6 +376,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.diffWordWrap !== DEFAULT_UNIFIED_SETTINGS.diffWordWrap
         ? ["Diff line wrapping"]
         : []),
+      ...(settings.sidebarSide !== DEFAULT_UNIFIED_SETTINGS.sidebarSide
+        ? ["Sidebar position"]
+        : []),
       ...(settings.enableAssistantStreaming !== DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming
         ? ["Assistant output"]
         : []),
@@ -383,6 +391,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete
         ? ["Delete confirmation"]
         : []),
+      ...(settings.showComingSoonModelOptions !==
+      DEFAULT_UNIFIED_SETTINGS.showComingSoonModelOptions
+        ? ["Coming-soon providers"]
+        : []),
       ...(isGitWritingModelDirty ? ["Git writing model"] : []),
       ...(areProviderSettingsDirty ? ["Providers"] : []),
     ],
@@ -394,6 +406,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.defaultThreadEnvMode,
       settings.diffWordWrap,
       settings.enableAssistantStreaming,
+      settings.showComingSoonModelOptions,
+      settings.sidebarSide,
       settings.timestampFormat,
       theme,
     ],
@@ -687,7 +701,7 @@ export function GeneralSettingsPanel() {
       <SettingsSection title="General">
         <SettingsRow
           title="Theme"
-          description="Choose how T3 Code looks across the app."
+          description="Choose how daycode looks across the app."
           resetAction={
             theme !== "system" ? (
               <SettingResetButton label="theme" onClick={() => setTheme("system")} />
@@ -781,6 +795,45 @@ export function GeneralSettingsPanel() {
               onCheckedChange={(checked) => updateSettings({ diffWordWrap: Boolean(checked) })}
               aria-label="Wrap diff lines by default"
             />
+          }
+        />
+
+        <SettingsRow
+          title="Sidebar position"
+          description="Keep the main navigation on the left edge or move it to the right."
+          resetAction={
+            settings.sidebarSide !== DEFAULT_UNIFIED_SETTINGS.sidebarSide ? (
+              <SettingResetButton
+                label="sidebar position"
+                onClick={() =>
+                  updateSettings({
+                    sidebarSide: DEFAULT_UNIFIED_SETTINGS.sidebarSide,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.sidebarSide}
+              onValueChange={(value) => {
+                if (value === "left" || value === "right") {
+                  updateSettings({ sidebarSide: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Sidebar position">
+                <SelectValue>{SIDEBAR_SIDE_LABELS[settings.sidebarSide]}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="left">
+                  {SIDEBAR_SIDE_LABELS.left}
+                </SelectItem>
+                <SelectItem hideIndicator value="right">
+                  {SIDEBAR_SIDE_LABELS.right}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
           }
         />
 
@@ -905,6 +958,33 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
+          title="Coming-soon providers"
+          description="Show provider options that are not available yet in model pickers."
+          resetAction={
+            settings.showComingSoonModelOptions !==
+            DEFAULT_UNIFIED_SETTINGS.showComingSoonModelOptions ? (
+              <SettingResetButton
+                label="coming-soon providers"
+                onClick={() =>
+                  updateSettings({
+                    showComingSoonModelOptions: DEFAULT_UNIFIED_SETTINGS.showComingSoonModelOptions,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.showComingSoonModelOptions}
+              onCheckedChange={(checked) =>
+                updateSettings({ showComingSoonModelOptions: Boolean(checked) })
+              }
+              aria-label="Show coming-soon providers"
+            />
+          }
+        />
+
+        <SettingsRow
           title="Text generation model"
           description="Configure the model used for generated commit messages, PR titles, and similar Git text."
           resetAction={
@@ -928,6 +1008,7 @@ export function GeneralSettingsPanel() {
                 lockedProvider={null}
                 providers={serverProviders}
                 modelOptionsByProvider={gitModelOptionsByProvider}
+                showComingSoonModelOptions={settings.showComingSoonModelOptions}
                 triggerVariant="outline"
                 triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
                 onProviderModelChange={(provider, model) => {

@@ -9,7 +9,11 @@
 import { Schema, Context } from "effect";
 import type { Effect } from "effect";
 
-import type { ProjectSearchEntriesInput, ProjectSearchEntriesResult } from "@t3tools/contracts";
+import type {
+  ProjectEntry,
+  ProjectSearchEntriesInput,
+  ProjectSearchEntriesResult,
+} from "@t3tools/contracts";
 
 export class WorkspaceEntriesError extends Schema.TaggedErrorClass<WorkspaceEntriesError>()(
   "WorkspaceEntriesError",
@@ -26,6 +30,14 @@ export class WorkspaceEntriesError extends Schema.TaggedErrorClass<WorkspaceEntr
  * invalidation.
  */
 export interface WorkspaceEntriesShape {
+  /**
+   * Return indexed files whose basename exactly matches the provided name.
+   */
+  readonly listFilesByBasename: (input: {
+    cwd: string;
+    basename: string;
+  }) => Effect.Effect<readonly ProjectEntry[], WorkspaceEntriesError>;
+
   /**
    * Search indexed workspace entries for files and directories matching the
    * provided query.

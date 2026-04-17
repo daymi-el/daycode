@@ -256,6 +256,8 @@ function makeClientSession(input: {
 }
 
 const createDesktopBridgeStub = (overrides?: {
+  readonly getClientSettings?: DesktopBridge["getClientSettings"];
+  readonly setClientSettings?: DesktopBridge["setClientSettings"];
   readonly serverExposureState?: Awaited<ReturnType<DesktopBridge["getServerExposureState"]>>;
   readonly setServerExposureMode?: DesktopBridge["setServerExposureMode"];
 }): DesktopBridge => {
@@ -282,8 +284,8 @@ const createDesktopBridgeStub = (overrides?: {
       wsBaseUrl: "ws://127.0.0.1:3773",
       bootstrapToken: "desktop-bootstrap-token",
     }),
-    getClientSettings: vi.fn().mockResolvedValue(null),
-    setClientSettings: vi.fn().mockResolvedValue(undefined),
+    getClientSettings: overrides?.getClientSettings ?? vi.fn().mockResolvedValue(null),
+    setClientSettings: overrides?.setClientSettings ?? vi.fn().mockResolvedValue(undefined),
     getSavedEnvironmentRegistry: vi.fn().mockResolvedValue([]),
     setSavedEnvironmentRegistry: vi.fn().mockResolvedValue(undefined),
     getSavedEnvironmentSecret: vi.fn().mockResolvedValue(null),
@@ -441,6 +443,62 @@ describe("GeneralSettingsPanel observability", () => {
         ),
       )
       .toBeInTheDocument();
+  });
+
+  it("persists the sidebar position preference from general settings", async () => {
+    const setClientSettings = vi.fn().mockResolvedValue(undefined);
+    window.desktopBridge = createDesktopBridgeStub({ setClientSettings });
+
+    setServerConfigSnapshot(createBaseServerConfig());
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <GeneralSettingsPanel />
+      </AppAtomRegistryProvider>,
+    );
+
+    await page.getByLabelText("Sidebar position").click();
+    await page.getByRole("option", { name: "Right", exact: true }).click();
+
+    await vi.waitFor(() => {
+      expect(setClientSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sidebarSide: "right",
+        }),
+      );
+    });
+  });
+
+  it("keeps coming-soon providers hidden by default and persists the preference toggle", async () => {
+    const setClientSettings = vi.fn().mockResolvedValue(undefined);
+    window.desktopBridge = createDesktopBridgeStub({ setClientSettings });
+
+    setServerConfigSnapshot(createBaseServerConfig());
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <GeneralSettingsPanel />
+      </AppAtomRegistryProvider>,
+    );
+
+    const comingSoonToggle = page.getByLabelText("Show coming-soon providers");
+    await expect.element(comingSoonToggle).toHaveAttribute("data-state", "unchecked");
+
+    await page.getByRole("button", { name: /gpt/i }).click();
+    await expect.element(page.getByText("Cursor")).not.toBeInTheDocument();
+    await expect.element(page.getByText("OpenCode")).not.toBeInTheDocument();
+    await expect.element(page.getByText("Gemini")).not.toBeInTheDocument();
+
+    await page.getByRole("button", { name: /gpt/i }).click();
+    await comingSoonToggle.click();
+
+    await vi.waitFor(() => {
+      expect(setClientSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          showComingSoonModelOptions: true,
+        }),
+      );
+    });
   });
 
   it("creates and shows a pairing link when network access is enabled", async () => {
@@ -659,7 +717,7 @@ describe("GeneralSettingsPanel observability", () => {
     await networkAccessToggle.click();
     await expect.element(page.getByText("Enable network access?")).toBeInTheDocument();
     await expect
-      .element(page.getByText("T3 Code will restart to expose this environment over the network."))
+      .element(page.getByText("daycode will restart to expose this environment over the network."))
       .toBeInTheDocument();
     await page.getByRole("button", { name: "Restart and enable", exact: true }).click();
     await vi.waitFor(() => {

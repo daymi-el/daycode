@@ -83,6 +83,7 @@ import {
   type BrowserTraceCollectorShape,
 } from "./observability/Services/BrowserTraceCollector.ts";
 import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver.ts";
+import { ProjectPackageJsonCatalogLive } from "./project/Layers/ProjectPackageJsonCatalog.ts";
 import {
   ProjectSetupScriptRunner,
   type ProjectSetupScriptRunnerShape,
@@ -162,15 +163,19 @@ const makeDefaultOrchestrationReadModel = () => {
   };
 };
 
-const workspaceAndProjectServicesLayer = Layer.mergeAll(
+const workspaceServicesLayer = Layer.mergeAll(
   WorkspacePathsLive,
   WorkspaceEntriesLive.pipe(Layer.provide(WorkspacePathsLive)),
   WorkspaceFileSystemLive.pipe(
     Layer.provide(WorkspacePathsLive),
     Layer.provide(WorkspaceEntriesLive.pipe(Layer.provide(WorkspacePathsLive))),
   ),
-  ProjectFaviconResolverLive,
 );
+
+const workspaceAndProjectServicesLayer = Layer.mergeAll(
+  ProjectFaviconResolverLive,
+  ProjectPackageJsonCatalogLive,
+).pipe(Layer.provideMerge(workspaceServicesLayer));
 
 const browserOtlpTracingLayer = Layer.mergeAll(
   FetchHttpClient.layer,
@@ -1973,6 +1978,82 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         result.failure.message,
         "Workspace root does not exist: /definitely/not/a/real/workspace/path",
       );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes websocket rpc projects.listPackageJsonScripts", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "t3-ws-project-package-json-scripts-",
+      });
+      yield* fs.writeFileString(
+        path.join(workspaceDir, "package.json"),
+        JSON.stringify({
+          name: "repo-root",
+          packageManager: "bun@1.2.0",
+          scripts: {
+            dev: "vite",
+          },
+        }),
+      );
+      yield* fs.makeDirectory(path.join(workspaceDir, "apps", "web"), { recursive: true });
+      yield* fs.writeFileString(
+        path.join(workspaceDir, "apps", "web", "package.json"),
+        JSON.stringify({
+          name: "@repo/web",
+          scripts: {
+            lint: "eslint .",
+          },
+        }),
+      );
+      yield* fs.writeFileString(path.join(workspaceDir, "apps", "yarn.lock"), "");
+
+      yield* buildAppUnderTest();
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.projectsListPackageJsonScripts]({
+            cwd: workspaceDir,
+          }),
+        ),
+      );
+
+      assert.deepEqual(response.packageJsons, [
+        {
+          relativePath: "package.json",
+          packageName: "repo-root",
+          packageManager: "bun",
+          scripts: [{ name: "dev", command: "vite" }],
+        },
+        {
+          relativePath: "apps/web/package.json",
+          packageName: "@repo/web",
+          packageManager: "yarn",
+          scripts: [{ name: "lint", command: "eslint ." }],
+        },
+      ]);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes websocket rpc projects.listPackageJsonScripts errors", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const result = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.projectsListPackageJsonScripts]({
+            cwd: "/definitely/not/a/real/workspace/path",
+          }),
+        ).pipe(Effect.result),
+      );
+
+      assertTrue(result._tag === "Failure");
+      assertTrue(result.failure._tag === "ProjectListPackageJsonScriptsError");
+      assertInclude(result.failure.message, "Workspace root does not exist:");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

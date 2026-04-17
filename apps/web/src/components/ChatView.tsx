@@ -3,6 +3,7 @@ import {
   DEFAULT_MODEL_BY_PROVIDER,
   type ClaudeCodeEffort,
   type EnvironmentId,
+  type ProjectPackageJsonDescriptor,
   type MessageId,
   type ModelSelection,
   type ProjectScript,
@@ -26,6 +27,11 @@ import {
   scopeThreadRef,
 } from "@t3tools/client-runtime";
 import { applyClaudePromptEffortPrefix } from "@t3tools/shared/model";
+import {
+  buildImportedProjectScriptCommand,
+  buildImportedProjectScriptName,
+  inferImportedProjectScriptIcon,
+} from "@t3tools/shared/projectScriptImport";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { truncate } from "@t3tools/shared/String";
 import { Debouncer } from "@tanstack/react-pacer";
@@ -1719,7 +1725,7 @@ export default function ChatView(props: ChatViewProps) {
       previousScripts: ProjectScript[];
       nextScripts: ProjectScript[];
       keybinding?: string | null;
-      keybindingCommand: KeybindingCommand;
+      keybindingCommand?: KeybindingCommand | null;
     }) => {
       const api = readEnvironmentApi(environmentId);
       if (!api) return;
@@ -1731,10 +1737,12 @@ export default function ChatView(props: ChatViewProps) {
         scripts: input.nextScripts,
       });
 
-      const keybindingRule = decodeProjectScriptKeybindingRule({
-        keybinding: input.keybinding,
-        command: input.keybindingCommand,
-      });
+      const keybindingRule = input.keybindingCommand
+        ? decodeProjectScriptKeybindingRule({
+            keybinding: input.keybinding,
+            command: input.keybindingCommand,
+          })
+        : null;
 
       if (isElectron && keybindingRule) {
         const localApi = readLocalApi();
@@ -1841,6 +1849,97 @@ export default function ChatView(props: ChatViewProps) {
           description: error instanceof Error ? error.message : "An unexpected error occurred.",
         });
       }
+    },
+    [activeProject, persistProjectScripts],
+  );
+  const loadProjectPackageJsonScripts = useCallback<
+    () => Promise<ProjectPackageJsonDescriptor[]>
+  >(async () => {
+    if (!activeProject) return [];
+
+    const api = readEnvironmentApi(environmentId);
+    if (!api) {
+      throw new Error("Environment API unavailable.");
+    }
+
+    const result = await api.projects.listPackageJsonScripts({
+      cwd: activeProject.cwd,
+    });
+    return Array.from(result.packageJsons);
+  }, [activeProject, environmentId]);
+  const importProjectPackageJsonScripts = useCallback(
+    async (input: { packageJson: ProjectPackageJsonDescriptor; scriptNames: string[] }) => {
+      if (!activeProject) return;
+
+      const selectedScriptNames = new Set(input.scriptNames);
+      const selectedScripts = input.packageJson.scripts.filter((script) =>
+        selectedScriptNames.has(script.name),
+      );
+      if (selectedScripts.length === 0) {
+        throw new Error("Select at least one script to import.");
+      }
+
+      const nextScripts = [...activeProject.scripts];
+      let addedCount = 0;
+      let updatedCount = 0;
+
+      for (const script of selectedScripts) {
+        const importedName = buildImportedProjectScriptName({
+          relativePath: input.packageJson.relativePath,
+          scriptName: script.name,
+        });
+        const importedCommand = buildImportedProjectScriptCommand({
+          relativePath: input.packageJson.relativePath,
+          packageManager: input.packageJson.packageManager,
+          scriptName: script.name,
+        });
+        const importedIcon = inferImportedProjectScriptIcon(script.name);
+
+        const existingIndex = nextScripts.findIndex(
+          (projectScript) => projectScript.name === importedName,
+        );
+        if (existingIndex >= 0) {
+          const existingScript = nextScripts[existingIndex]!;
+          nextScripts[existingIndex] = {
+            ...existingScript,
+            name: importedName,
+            command: importedCommand,
+            icon: importedIcon,
+          };
+          updatedCount += 1;
+          continue;
+        }
+
+        nextScripts.push({
+          id: nextProjectScriptId(
+            importedName,
+            nextScripts.map((projectScript) => projectScript.id),
+          ),
+          name: importedName,
+          command: importedCommand,
+          icon: importedIcon,
+          runOnWorktreeCreate: false,
+        });
+        addedCount += 1;
+      }
+
+      await persistProjectScripts({
+        projectId: activeProject.id,
+        projectCwd: activeProject.cwd,
+        previousScripts: activeProject.scripts,
+        nextScripts,
+      });
+
+      toastManager.add({
+        type: "success",
+        title: `Imported ${selectedScripts.length} actions from ${input.packageJson.relativePath}`,
+        description:
+          addedCount > 0 && updatedCount > 0
+            ? `Added ${addedCount} and updated ${updatedCount}.`
+            : addedCount > 0
+              ? `Added ${addedCount}.`
+              : `Updated ${updatedCount}.`,
+      });
     },
     [activeProject, persistProjectScripts],
   );
@@ -3209,6 +3308,8 @@ export default function ChatView(props: ChatViewProps) {
           onAddProjectScript={saveProjectScript}
           onUpdateProjectScript={updateProjectScript}
           onDeleteProjectScript={deleteProjectScript}
+          onLoadProjectPackageJsonScripts={loadProjectPackageJsonScripts}
+          onImportProjectPackageJsonScripts={importProjectPackageJsonScripts}
           onToggleTerminal={toggleTerminalVisibility}
           onToggleDiff={onToggleDiff}
         />

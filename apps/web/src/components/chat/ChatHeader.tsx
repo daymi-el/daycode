@@ -1,6 +1,7 @@
 import {
   type EnvironmentId,
   type EditorId,
+  type ProjectPackageJsonDescriptor,
   type ProjectScript,
   type ResolvedKeybindingsConfig,
   type ThreadId,
@@ -39,6 +40,11 @@ interface ChatHeaderProps {
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
   onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
   onDeleteProjectScript: (scriptId: string) => Promise<void>;
+  onLoadProjectPackageJsonScripts: () => Promise<ProjectPackageJsonDescriptor[]>;
+  onImportProjectPackageJsonScripts: (input: {
+    packageJson: ProjectPackageJsonDescriptor;
+    scriptNames: string[];
+  }) => Promise<void>;
   onToggleTerminal: () => void;
   onToggleDiff: () => void;
 }
@@ -65,6 +71,8 @@ export const ChatHeader = memo(function ChatHeader({
   onAddProjectScript,
   onUpdateProjectScript,
   onDeleteProjectScript,
+  onLoadProjectPackageJsonScripts,
+  onImportProjectPackageJsonScripts,
   onToggleTerminal,
   onToggleDiff,
 }: ChatHeaderProps) {
@@ -99,6 +107,8 @@ export const ChatHeader = memo(function ChatHeader({
             onAddScript={onAddProjectScript}
             onUpdateScript={onUpdateProjectScript}
             onDeleteScript={onDeleteProjectScript}
+            onLoadPackageJsonScripts={onLoadProjectPackageJsonScripts}
+            onImportPackageJsonScripts={onImportProjectPackageJsonScripts}
           />
         )}
         {activeProjectName && (

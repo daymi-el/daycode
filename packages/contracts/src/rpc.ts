@@ -44,6 +44,9 @@ import {
   OrchestrationRpcSchemas,
 } from "./orchestration";
 import {
+  ProjectListPackageJsonScriptsError,
+  ProjectListPackageJsonScriptsInput,
+  ProjectListPackageJsonScriptsResult,
   ProjectSearchEntriesError,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
@@ -77,6 +80,7 @@ export const WS_METHODS = {
   projectsList: "projects.list",
   projectsAdd: "projects.add",
   projectsRemove: "projects.remove",
+  projectsListPackageJsonScripts: "projects.listPackageJsonScripts",
   projectsSearchEntries: "projects.searchEntries",
   projectsWriteFile: "projects.writeFile",
 
@@ -153,6 +157,15 @@ export const WsProjectsSearchEntriesRpc = Rpc.make(WS_METHODS.projectsSearchEntr
   success: ProjectSearchEntriesResult,
   error: ProjectSearchEntriesError,
 });
+
+export const WsProjectsListPackageJsonScriptsRpc = Rpc.make(
+  WS_METHODS.projectsListPackageJsonScripts,
+  {
+    payload: ProjectListPackageJsonScriptsInput,
+    success: ProjectListPackageJsonScriptsResult,
+    error: ProjectListPackageJsonScriptsError,
+  },
+);
 
 export const WsProjectsWriteFileRpc = Rpc.make(WS_METHODS.projectsWriteFile, {
   payload: ProjectWriteFileInput,
@@ -347,6 +360,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerUpsertKeybindingRpc,
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
+  WsProjectsListPackageJsonScriptsRpc,
   WsProjectsSearchEntriesRpc,
   WsProjectsWriteFileRpc,
   WsShellOpenInEditorRpc,

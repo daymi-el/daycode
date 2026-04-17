@@ -62,8 +62,8 @@ import {
   clearPersistedServerRuntimeState,
   readPersistedServerRuntimeState,
 } from "./serverRuntimeState";
-import { WorkspacePaths } from "./workspace/Services/WorkspacePaths";
-import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths";
+import { WorkspacePaths } from "./workspace/Services/WorkspacePaths.ts";
+import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
 
 const PortSchema = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }));
 

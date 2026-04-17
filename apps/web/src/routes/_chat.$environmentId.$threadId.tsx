@@ -22,6 +22,7 @@ import { createThreadSelectorByRef } from "../storeSelectors";
 import { resolveThreadRouteRef, buildThreadRouteParams } from "../threadRoutes";
 import { Sheet, SheetPopup } from "../components/ui/sheet";
 import { Sidebar, SidebarInset, SidebarProvider, SidebarRail } from "~/components/ui/sidebar";
+import { useSettings } from "~/hooks/useSettings";
 
 const DiffPanel = lazy(() => import("../components/DiffPanel"));
 const DIFF_INLINE_LAYOUT_MEDIA_QUERY = "(max-width: 1180px)";
@@ -79,8 +80,9 @@ const DiffPanelInlineSidebar = (props: {
   onCloseDiff: () => void;
   onOpenDiff: () => void;
   renderDiffContent: boolean;
+  side: "left" | "right";
 }) => {
-  const { diffOpen, onCloseDiff, onOpenDiff, renderDiffContent } = props;
+  const { diffOpen, onCloseDiff, onOpenDiff, renderDiffContent, side } = props;
   const onOpenChange = useCallback(
     (open: boolean) => {
       if (open) {
@@ -146,9 +148,11 @@ const DiffPanelInlineSidebar = (props: {
       style={{ "--sidebar-width": DIFF_INLINE_DEFAULT_WIDTH } as React.CSSProperties}
     >
       <Sidebar
-        side="right"
+        side={side}
         collapsible="offcanvas"
-        className="border-l border-border bg-card text-foreground"
+        className={`${
+          side === "left" ? "border-r" : "border-l"
+        } border-border bg-card text-foreground`}
         resizable={{
           minWidth: DIFF_INLINE_SIDEBAR_MIN_WIDTH,
           shouldAcceptWidth: shouldAcceptInlineSidebarWidth,
@@ -193,6 +197,8 @@ function ChatThreadRouteView() {
   const environmentHasAnyThreads = environmentHasServerThreads || environmentHasDraftThreads;
   const diffOpen = search.diff === "1";
   const shouldUseDiffSheet = useMediaQuery(DIFF_INLINE_LAYOUT_MEDIA_QUERY);
+  const sidebarSide = useSettings((settings) => settings.sidebarSide);
+  const diffSidebarSide = sidebarSide === "right" ? "left" : "right";
   const currentThreadKey = threadRef ? `${threadRef.environmentId}:${threadRef.threadId}` : null;
   const [diffPanelMountState, setDiffPanelMountState] = useState(() => ({
     threadKey: currentThreadKey,
@@ -262,23 +268,31 @@ function ChatThreadRouteView() {
   const shouldRenderDiffContent = diffOpen || hasOpenedDiff;
 
   if (!shouldUseDiffSheet) {
+    const threadContent = (
+      <SidebarInset className="h-dvh  min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
+        <ChatView
+          environmentId={threadRef.environmentId}
+          threadId={threadRef.threadId}
+          onDiffPanelOpen={markDiffOpened}
+          reserveTitleBarControlInset={!diffOpen}
+          routeKind="server"
+        />
+      </SidebarInset>
+    );
+    const diffSidebar = (
+      <DiffPanelInlineSidebar
+        diffOpen={diffOpen}
+        onCloseDiff={closeDiff}
+        onOpenDiff={openDiff}
+        renderDiffContent={shouldRenderDiffContent}
+        side={diffSidebarSide}
+      />
+    );
+
     return (
       <>
-        <SidebarInset className="h-dvh  min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
-          <ChatView
-            environmentId={threadRef.environmentId}
-            threadId={threadRef.threadId}
-            onDiffPanelOpen={markDiffOpened}
-            reserveTitleBarControlInset={!diffOpen}
-            routeKind="server"
-          />
-        </SidebarInset>
-        <DiffPanelInlineSidebar
-          diffOpen={diffOpen}
-          onCloseDiff={closeDiff}
-          onOpenDiff={openDiff}
-          renderDiffContent={shouldRenderDiffContent}
-        />
+        {diffSidebarSide === "left" ? diffSidebar : threadContent}
+        {diffSidebarSide === "left" ? threadContent : diffSidebar}
       </>
     );
   }

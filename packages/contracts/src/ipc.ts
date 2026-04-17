@@ -19,6 +19,8 @@ import type {
   GitCreateBranchResult,
 } from "./git";
 import type {
+  ProjectListPackageJsonScriptsInput,
+  ProjectListPackageJsonScriptsResult,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
   ProjectWriteFileInput,
@@ -225,6 +227,9 @@ export interface EnvironmentApi {
     onEvent: (callback: (event: TerminalEvent) => void) => () => void;
   };
   projects: {
+    listPackageJsonScripts: (
+      input: ProjectListPackageJsonScriptsInput,
+    ) => Promise<ProjectListPackageJsonScriptsResult>;
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;
     writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
   };

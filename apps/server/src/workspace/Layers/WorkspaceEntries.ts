@@ -379,6 +379,29 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
     },
   );
 
+  const listFilesByBasename: WorkspaceEntriesShape["listFilesByBasename"] = Effect.fn(
+    "WorkspaceEntries.listFilesByBasename",
+  )(function* (input) {
+    const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd);
+    const normalizedBasename = input.basename.trim().toLowerCase();
+    if (normalizedBasename.length === 0) {
+      return [];
+    }
+
+    return yield* Cache.get(workspaceIndexCache, normalizedCwd).pipe(
+      Effect.map((index) =>
+        index.entries
+          .filter((entry) => entry.kind === "file" && entry.normalizedName === normalizedBasename)
+          .map(
+            ({ normalizedName: _normalizedName, normalizedPath: _normalizedPath, ...entry }) => ({
+              ...entry,
+            }),
+          )
+          .toSorted((left, right) => left.path.localeCompare(right.path)),
+      ),
+    );
+  });
+
   const search: WorkspaceEntriesShape["search"] = Effect.fn("WorkspaceEntries.search")(
     function* (input) {
       const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd);
@@ -416,6 +439,7 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
 
   return {
     invalidate,
+    listFilesByBasename,
     search,
   } satisfies WorkspaceEntriesShape;
 });

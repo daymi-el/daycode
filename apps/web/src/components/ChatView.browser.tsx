@@ -231,8 +231,16 @@ function createSnapshotForTargetUser(options: {
   targetMessageId: MessageId;
   targetText: string;
   targetAttachmentCount?: number;
+  modelSelection?: {
+    provider: "codex" | "claudeAgent";
+    model: string;
+  };
   sessionStatus?: OrchestrationSessionStatus;
 }): OrchestrationReadModel {
+  const modelSelection = options.modelSelection ?? {
+    provider: "codex" as const,
+    model: "gpt-5",
+  };
   const messages: Array<OrchestrationReadModel["threads"][number]["messages"][number]> = [];
 
   for (let index = 0; index < 22; index += 1) {
@@ -275,10 +283,7 @@ function createSnapshotForTargetUser(options: {
         id: PROJECT_ID,
         title: "Project",
         workspaceRoot: "/repo/project",
-        defaultModelSelection: {
-          provider: "codex",
-          model: "gpt-5",
-        },
+        defaultModelSelection: modelSelection,
         scripts: [],
         createdAt: NOW_ISO,
         updatedAt: NOW_ISO,
@@ -290,10 +295,7 @@ function createSnapshotForTargetUser(options: {
         id: THREAD_ID,
         projectId: PROJECT_ID,
         title: THREAD_TITLE,
-        modelSelection: {
-          provider: "codex",
-          model: "gpt-5",
-        },
+        modelSelection,
         interactionMode: "default",
         runtimeMode: "full-access",
         branch: "main",
@@ -310,7 +312,7 @@ function createSnapshotForTargetUser(options: {
         session: {
           threadId: THREAD_ID,
           status: options.sessionStatus ?? "ready",
-          providerName: "codex",
+          providerName: modelSelection.provider,
           runtimeMode: "full-access",
           activeTurnId: null,
           lastError: null,
@@ -921,6 +923,11 @@ function resolveWsRpc(body: NormalizedWsRpcRequestBody): unknown {
     return {
       entries: [],
       truncated: false,
+    };
+  }
+  if (tag === WS_METHODS.projectsListPackageJsonScripts) {
+    return {
+      packageJsons: [],
     };
   }
   if (tag === WS_METHODS.shellOpenInEditor) {
@@ -2100,6 +2107,253 @@ describe("ChatView timeline estimator parity (full app)", () => {
               T3CODE_WORKTREE_PATH: "/repo/worktrees/feature-draft",
             },
           });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("imports a selected subset of nested package.json scripts into project actions", async () => {
+    useComposerDraftStore.setState({
+      draftThreadsByThreadKey: {
+        [THREAD_KEY]: {
+          threadId: THREAD_ID,
+          environmentId: LOCAL_ENVIRONMENT_ID,
+          projectId: PROJECT_ID,
+          logicalProjectKey: PROJECT_DRAFT_KEY,
+          createdAt: NOW_ISO,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          envMode: "local",
+        },
+      },
+      logicalProjectDraftThreadKeyByLogicalProjectKey: {
+        [PROJECT_DRAFT_KEY]: THREAD_KEY,
+      },
+    });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: withProjectScripts(createDraftOnlySnapshot(), []),
+      resolveRpc: (body) => {
+        if (body._tag === WS_METHODS.projectsListPackageJsonScripts) {
+          return {
+            packageJsons: [
+              {
+                relativePath: "apps/web/package.json",
+                packageName: "@repo/web",
+                packageManager: "bun",
+                scripts: [
+                  { name: "dev", command: "vite dev" },
+                  { name: "lint", command: "eslint ." },
+                ],
+              },
+            ],
+          };
+        }
+        if (body._tag === ORCHESTRATION_WS_METHODS.dispatchCommand) {
+          return {
+            sequence: fixture.snapshot.snapshotSequence + 1,
+          };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      const optionsButton = await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('button[aria-label="Action options"]'),
+        "Unable to find action options button.",
+      );
+      optionsButton.click();
+
+      const importMenuItem = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll<HTMLElement>('[data-slot="menu-item"]')).find(
+            (item) => item.textContent?.includes("Import from package.json"),
+          ) ?? null,
+        "Unable to find import from package.json menu item.",
+      );
+      importMenuItem.click();
+
+      await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("h2, h3")).find((element) =>
+            element.textContent?.includes("Import Actions from package.json"),
+          ) ?? null,
+        "Unable to find import actions dialog.",
+      );
+
+      await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("label")).find((label) =>
+            label.textContent?.includes("lint"),
+          ) ?? null,
+        "Unable to find lint script row.",
+      );
+
+      const devScriptRow = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("label")).find((label) =>
+            label.textContent?.includes("dev"),
+          ) ?? null,
+        "Unable to find dev script row.",
+      );
+      devScriptRow.click();
+
+      const importButton = await waitForButtonByText("Import actions");
+      importButton.click();
+
+      await vi.waitFor(
+        () => {
+          const dispatchRequest = wsRequests.find(
+            (request) =>
+              request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              request.type === "project.meta.update",
+          ) as
+            | {
+                _tag: string;
+                type?: string;
+                projectId?: string;
+                scripts?: Array<{
+                  id: string;
+                  name: string;
+                  command: string;
+                  icon: string;
+                  runOnWorktreeCreate: boolean;
+                }>;
+              }
+            | undefined;
+
+          expect(dispatchRequest).toMatchObject({
+            _tag: ORCHESTRATION_WS_METHODS.dispatchCommand,
+            type: "project.meta.update",
+            projectId: PROJECT_ID,
+          });
+          expect(dispatchRequest?.scripts).toEqual([
+            {
+              id: "apps-web-lint",
+              name: "apps/web:lint",
+              command: 'bun --cwd "apps/web" run lint',
+              icon: "lint",
+              runOnWorktreeCreate: false,
+            },
+          ]);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("updates matching imported actions in place and preserves worktree setup flags", async () => {
+    useComposerDraftStore.setState({
+      draftThreadsByThreadKey: {
+        [THREAD_KEY]: {
+          threadId: THREAD_ID,
+          environmentId: LOCAL_ENVIRONMENT_ID,
+          projectId: PROJECT_ID,
+          logicalProjectKey: PROJECT_DRAFT_KEY,
+          createdAt: NOW_ISO,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          envMode: "local",
+        },
+      },
+      logicalProjectDraftThreadKeyByLogicalProjectKey: {
+        [PROJECT_DRAFT_KEY]: THREAD_KEY,
+      },
+    });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: withProjectScripts(createDraftOnlySnapshot(), [
+        {
+          id: "existing-dev",
+          name: "apps/web:dev",
+          command: "bun run old-dev",
+          icon: "debug",
+          runOnWorktreeCreate: true,
+        },
+      ]),
+      resolveRpc: (body) => {
+        if (body._tag === WS_METHODS.projectsListPackageJsonScripts) {
+          return {
+            packageJsons: [
+              {
+                relativePath: "apps/web/package.json",
+                packageName: "@repo/web",
+                packageManager: "bun",
+                scripts: [{ name: "dev", command: "vite dev" }],
+              },
+            ],
+          };
+        }
+        if (body._tag === ORCHESTRATION_WS_METHODS.dispatchCommand) {
+          return {
+            sequence: fixture.snapshot.snapshotSequence + 1,
+          };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      const optionsButton = await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('button[aria-label="Script actions"]'),
+        "Unable to find script actions button.",
+      );
+      optionsButton.click();
+
+      const importMenuItem = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll<HTMLElement>('[data-slot="menu-item"]')).find(
+            (item) => item.textContent?.includes("Import from package.json"),
+          ) ?? null,
+        "Unable to find import from package.json menu item.",
+      );
+      importMenuItem.click();
+
+      const importButton = await waitForButtonByText("Import actions");
+      importButton.click();
+
+      await vi.waitFor(
+        () => {
+          const dispatchRequest = wsRequests.find(
+            (request) =>
+              request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              request.type === "project.meta.update",
+          ) as
+            | {
+                _tag: string;
+                type?: string;
+                scripts?: Array<{
+                  id: string;
+                  name: string;
+                  command: string;
+                  icon: string;
+                  runOnWorktreeCreate: boolean;
+                }>;
+              }
+            | undefined;
+
+          expect(dispatchRequest).toBeTruthy();
+          expect(dispatchRequest?.scripts).toEqual([
+            {
+              id: "existing-dev",
+              name: "apps/web:dev",
+              command: 'bun --cwd "apps/web" run dev',
+              icon: "play",
+              runOnWorktreeCreate: true,
+            },
+          ]);
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -3442,6 +3696,92 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("shows the codex provider icon next to the sidebar thread title", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-sidebar-codex-provider-target" as MessageId,
+        targetText: "sidebar codex provider target",
+      }),
+    });
+
+    try {
+      const providerIcon = page.getByTestId(`thread-provider-icon-${THREAD_ID}`);
+
+      await expect.element(providerIcon).toBeInTheDocument();
+      await vi.waitFor(() => {
+        const iconElement = document.querySelector<HTMLElement>(
+          `[data-testid="thread-provider-icon-${THREAD_ID}"]`,
+        );
+        expect(iconElement?.getAttribute("aria-label")).toBe("Codex");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("shows the claude provider icon next to the sidebar thread title", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-sidebar-claude-provider-target" as MessageId,
+        targetText: "sidebar claude provider target",
+        modelSelection: {
+          provider: "claudeAgent",
+          model: "claude-sonnet-4-6",
+        },
+      }),
+    });
+
+    try {
+      const providerIcon = page.getByTestId(`thread-provider-icon-${THREAD_ID}`);
+
+      await expect.element(providerIcon).toBeInTheDocument();
+      await vi.waitFor(() => {
+        const iconElement = document.querySelector<HTMLElement>(
+          `[data-testid="thread-provider-icon-${THREAD_ID}"]`,
+        );
+        expect(iconElement?.getAttribute("aria-label")).toBe("Claude");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps the provider icon visible while renaming a thread from the sidebar", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-sidebar-provider-rename-target" as MessageId,
+        targetText: "sidebar provider rename target",
+      }),
+    });
+
+    try {
+      const threadRow = page.getByTestId(`thread-row-${THREAD_ID}`);
+
+      await expect.element(threadRow).toBeInTheDocument();
+      await threadRow.click({ button: "right" });
+
+      const renameButton = page.getByRole("button", { name: "Rename thread" });
+      await expect.element(renameButton).toBeInTheDocument();
+      await renameButton.click();
+
+      await vi.waitFor(() => {
+        const providerIcon = document.querySelector<HTMLElement>(
+          `[data-testid="thread-provider-icon-${THREAD_ID}"]`,
+        );
+        const renameInput = document.querySelector<HTMLInputElement>(
+          `[data-testid="thread-row-${THREAD_ID}"] input`,
+        );
+        expect(providerIcon).not.toBeNull();
+        expect(renameInput).not.toBeNull();
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("shows the confirm archive action after clicking the archive button", async () => {
     localStorage.setItem(
       "t3code:client-settings:v1",
@@ -4498,7 +4838,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       snapshot: createSnapshotWithPlanFollowUpPrompt({
         modelSelection: { provider: "codex", model: "gpt-5.3-codex-spark" },
         planMarkdown:
-          "# Imaginary Long-Range Plan: T3 Code Adaptive Orchestration and Safe-Delay Execution Initiative",
+          "# Imaginary Long-Range Plan: daycode Adaptive Orchestration and Safe-Delay Execution Initiative",
       }),
     });
 
@@ -4528,7 +4868,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       snapshot: createSnapshotWithPlanFollowUpPrompt({
         modelSelection: { provider: "codex", model: "gpt-5.3-codex-spark" },
         planMarkdown:
-          "# Imaginary Long-Range Plan: T3 Code Adaptive Orchestration and Safe-Delay Execution Initiative",
+          "# Imaginary Long-Range Plan: daycode Adaptive Orchestration and Safe-Delay Execution Initiative",
       }),
     });
 

@@ -53,6 +53,7 @@ function makeSidebarThreadSummary(
 ): SidebarThreadSummary {
   return {
     interactionMode: DEFAULT_INTERACTION_MODE,
+    provider: "codex",
     session: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     archivedAt: null,

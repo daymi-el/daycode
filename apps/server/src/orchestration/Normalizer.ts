@@ -9,7 +9,7 @@ import {
 import { createAttachmentId, resolveAttachmentPath } from "../attachmentStore";
 import { ServerConfig } from "../config";
 import { parseBase64DataUrl } from "../imageMime";
-import { WorkspacePaths } from "../workspace/Services/WorkspacePaths";
+import { WorkspacePaths } from "../workspace/Services/WorkspacePaths.ts";
 
 export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
   Effect.gen(function* () {
