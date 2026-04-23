@@ -7,6 +7,7 @@ import {
   checkPortAvailabilityOnHosts,
   createDevRunnerEnv,
   findFirstAvailableOffset,
+  isExpectedDevShutdownExitCode,
   resolveModePortOffsets,
   resolveOffset,
 } from "./dev-runner.ts";
@@ -41,6 +42,24 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         );
 
         assert.ok(error.includes("Invalid T3CODE_PORT_OFFSET"));
+      }),
+    );
+  });
+
+  describe("isExpectedDevShutdownExitCode", () => {
+    it.effect("treats signal-style shutdown codes as expected", () =>
+      Effect.sync(() => {
+        assert.equal(isExpectedDevShutdownExitCode(129), true);
+        assert.equal(isExpectedDevShutdownExitCode(130), true);
+        assert.equal(isExpectedDevShutdownExitCode(143), true);
+      }),
+    );
+
+    it.effect("does not hide real non-zero failures", () =>
+      Effect.sync(() => {
+        assert.equal(isExpectedDevShutdownExitCode(1), false);
+        assert.equal(isExpectedDevShutdownExitCode(2), false);
+        assert.equal(isExpectedDevShutdownExitCode(139), false);
       }),
     );
   });

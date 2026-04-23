@@ -15,6 +15,7 @@ const MAX_HASH_OFFSET = 3000;
 const MAX_PORT = 65535;
 const DESKTOP_DEV_LOOPBACK_HOST = "127.0.0.1";
 const DEV_PORT_PROBE_HOSTS = ["127.0.0.1", "0.0.0.0", "::1", "::"] as const;
+const EXPECTED_DEV_SHUTDOWN_EXIT_CODES = new Set([129, 130, 143]);
 
 export const DEFAULT_T3_HOME = Effect.map(Effect.service(Path.Path), (path) =>
   path.join(NodeOS.homedir(), ".t3"),
@@ -101,6 +102,10 @@ export function resolveOffset(config: {
 
   const offset = ((Hash.string(seed) >>> 0) % MAX_HASH_OFFSET) + 1;
   return { offset, source: `hashed T3CODE_DEV_INSTANCE=${seed}` };
+}
+
+export function isExpectedDevShutdownExitCode(exitCode: number): boolean {
+  return EXPECTED_DEV_SHUTDOWN_EXIT_CODES.has(exitCode);
 }
 
 function resolveBaseDir(baseDir: string | undefined): Effect.Effect<string, never, Path.Path> {
@@ -450,7 +455,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
     );
 
     const exitCode = yield* child.exitCode;
-    if (exitCode !== 0) {
+    if (exitCode !== 0 && !isExpectedDevShutdownExitCode(exitCode)) {
       return yield* new DevRunnerError({
         message: `turbo exited with code ${exitCode}`,
       });
