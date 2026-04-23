@@ -5,7 +5,7 @@ import {
   buildImportedProjectScriptName,
   importedProjectScriptDirectory,
   inferImportedProjectScriptIcon,
-} from "./projectScriptImport";
+} from "./projectScriptImport.ts";
 
 describe("projectScriptImport helpers", () => {
   it("derives action names for root and nested package.json files", () => {

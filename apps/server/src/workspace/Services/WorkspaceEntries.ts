@@ -10,6 +10,8 @@ import { Schema, Context } from "effect";
 import type { Effect } from "effect";
 
 import type {
+  FilesystemBrowseInput,
+  FilesystemBrowseResult,
   ProjectEntry,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
@@ -19,6 +21,17 @@ export class WorkspaceEntriesError extends Schema.TaggedErrorClass<WorkspaceEntr
   "WorkspaceEntriesError",
   {
     cwd: Schema.String,
+    operation: Schema.String,
+    detail: Schema.String,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
+
+export class WorkspaceEntriesBrowseError extends Schema.TaggedErrorClass<WorkspaceEntriesBrowseError>()(
+  "WorkspaceEntriesBrowseError",
+  {
+    cwd: Schema.optional(Schema.String),
+    partialPath: Schema.String,
     operation: Schema.String,
     detail: Schema.String,
     cause: Schema.optional(Schema.Defect),
@@ -37,6 +50,13 @@ export interface WorkspaceEntriesShape {
     cwd: string;
     basename: string;
   }) => Effect.Effect<readonly ProjectEntry[], WorkspaceEntriesError>;
+
+  /**
+   * Browse matching directories for the provided partial path.
+   */
+  readonly browse: (
+    input: FilesystemBrowseInput,
+  ) => Effect.Effect<FilesystemBrowseResult, WorkspaceEntriesBrowseError>;
 
   /**
    * Search indexed workspace entries for files and directories matching the

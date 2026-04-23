@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
 
-import { ClientSettingsSchema, DEFAULT_CLIENT_SETTINGS } from "./settings";
+import { ClientSettingsSchema, DEFAULT_CLIENT_SETTINGS } from "./settings.ts";
 
 const decodeClientSettings = Schema.decodeUnknownSync(ClientSettingsSchema);
 

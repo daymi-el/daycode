@@ -1,107 +1,79 @@
-import { type ProviderKind, type ServerProvider } from "@t3tools/contracts";
-import { resolveSelectableModel } from "@t3tools/shared/model";
-import { memo, useLayoutEffect, useRef, useState } from "react";
+import {
+  type ProviderKind,
+  type ResolvedKeybindingsConfig,
+  type ServerProvider,
+} from "@t3tools/contracts";
+import { memo, useEffect, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
-import { PROVIDER_OPTIONS } from "../../session-logic";
 import { ChevronDownIcon } from "lucide-react";
 import { Button, buttonVariants } from "../ui/button";
-import {
-  Menu,
-  MenuGroup,
-  MenuItem,
-  MenuPopup,
-  MenuRadioGroup,
-  MenuRadioItem,
-  MenuSeparator as MenuDivider,
-  MenuSub,
-  MenuSubPopup,
-  MenuSubTrigger,
-  MenuTrigger,
-} from "../ui/menu";
-import { Gemini, OpenCodeIcon } from "../Icons";
+import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
-import { getProviderSnapshot } from "../../providerModels";
-import { ProviderIcon } from "../ProviderIcon";
-
-function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): option is {
-  value: ProviderKind;
-  label: string;
-  available: true;
-} {
-  return option.available;
-}
-
-export const AVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter(isAvailableProviderOption);
-const UNAVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter((option) => !option.available);
-const COMING_SOON_PROVIDER_OPTIONS = [
-  { id: "opencode", label: "OpenCode", icon: OpenCodeIcon },
-  { id: "gemini", label: "Gemini", icon: Gemini },
-] as const;
+import { ModelPickerContent } from "./ModelPickerContent";
+import {
+  ModelEsque,
+  PROVIDER_ICON_BY_PROVIDER,
+  getTriggerDisplayModelLabel,
+  getTriggerDisplayModelName,
+} from "./providerIconUtils";
+import { setModelPickerOpen } from "../../modelPickerOpenState";
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   provider: ProviderKind;
   model: string;
   lockedProvider: ProviderKind | null;
   providers?: ReadonlyArray<ServerProvider>;
-  modelOptionsByProvider: Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>>;
+  keybindings?: ResolvedKeybindingsConfig;
+  modelOptionsByProvider: Record<ProviderKind, ReadonlyArray<ModelEsque>>;
   activeProviderIconClassName?: string;
   compact?: boolean;
   disabled?: boolean;
   showComingSoonModelOptions?: boolean;
+  terminalOpen?: boolean;
+  open?: boolean;
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
   triggerClassName?: string;
+  onOpenChange?: (open: boolean) => void;
   onProviderModelChange: (provider: ProviderKind, model: string) => void;
 }) {
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [triggerMinWidth, setTriggerMinWidth] = useState<number | null>(null);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
   const activeProvider = props.lockedProvider ?? props.provider;
+  const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
   const selectedProviderOptions = props.modelOptionsByProvider[activeProvider];
-  const selectedModelLabel =
-    selectedProviderOptions.find((option) => option.slug === props.model)?.name ?? props.model;
-  const showComingSoonModelOptions = props.showComingSoonModelOptions === true;
+  // If the current slug belongs to a different provider (for example after a provider
+  // switch or disable), prefer the active provider's first option so the trigger icon
+  // and label stay in sync instead of showing a stale foreign slug.
+  const selectedModel =
+    selectedProviderOptions.find((option) => option.slug === props.model) ??
+    selectedProviderOptions[0];
+  const ProviderIcon = PROVIDER_ICON_BY_PROVIDER[activeProvider];
+  const triggerTitle = selectedModel ? getTriggerDisplayModelName(selectedModel) : props.model;
+  const triggerSubtitle = selectedModel?.subProvider;
+  const triggerLabel = selectedModel ? getTriggerDisplayModelLabel(selectedModel) : props.model;
 
-  useLayoutEffect(() => {
-    const triggerElement = triggerRef.current;
-    if (!triggerElement) {
-      return;
+  const setIsMenuOpen = (open: boolean) => {
+    props.onOpenChange?.(open);
+    if (props.open === undefined) {
+      setUncontrolledIsMenuOpen(open);
     }
+  };
 
-    const updateTriggerMinWidth = () => {
-      setTriggerMinWidth(triggerElement.getBoundingClientRect().width);
-    };
-
-    updateTriggerMinWidth();
-
-    if (typeof ResizeObserver === "undefined") {
-      return;
-    }
-
-    const resizeObserver = new ResizeObserver(() => {
-      updateTriggerMinWidth();
-    });
-    resizeObserver.observe(triggerElement);
-
+  useEffect(() => {
+    setModelPickerOpen(isMenuOpen);
     return () => {
-      resizeObserver.disconnect();
+      setModelPickerOpen(false);
     };
-  }, []);
+  }, [isMenuOpen]);
 
-  const handleModelChange = (provider: ProviderKind, value: string) => {
+  const handleProviderModelChange = (provider: ProviderKind, model: string) => {
     if (props.disabled) return;
-    if (!value) return;
-    const resolvedModel = resolveSelectableModel(
-      provider,
-      value,
-      props.modelOptionsByProvider[provider],
-    );
-    if (!resolvedModel) return;
-    props.onProviderModelChange(provider, resolvedModel);
+    props.onProviderModelChange(provider, model);
     setIsMenuOpen(false);
   };
 
   return (
-    <Menu
+    <Popover
       open={isMenuOpen}
       onOpenChange={(open) => {
         if (props.disabled) {
@@ -111,10 +83,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         setIsMenuOpen(open);
       }}
     >
-      <MenuTrigger
+      <PopoverTrigger
         render={
           <Button
-            ref={triggerRef}
             size="sm"
             variant={props.triggerVariant ?? "ghost"}
             data-chat-provider-model-picker="true"
@@ -135,135 +106,54 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         >
           <ProviderIcon
             aria-hidden="true"
-            provider={activeProvider}
             className={cn("size-4 shrink-0", props.activeProviderIconClassName)}
           />
-          <span className="min-w-0 flex-1 truncate">{selectedModelLabel}</span>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span
+                  className={cn(
+                    "min-w-0 flex-1 overflow-hidden",
+                    triggerSubtitle
+                      ? "grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1"
+                      : "truncate",
+                  )}
+                />
+              }
+            >
+              {triggerSubtitle ? (
+                <>
+                  <span className="min-w-0 truncate">{triggerSubtitle}</span>
+                  <span aria-hidden="true" className="shrink-0 opacity-60">
+                    ·
+                  </span>
+                  <span className="min-w-0 truncate">{triggerTitle}</span>
+                </>
+              ) : (
+                triggerTitle
+              )}
+            </TooltipTrigger>
+            <TooltipPopup side="top">{triggerLabel}</TooltipPopup>
+          </Tooltip>
           <ChevronDownIcon aria-hidden="true" className="size-3 shrink-0 opacity-60" />
         </span>
-      </MenuTrigger>
-      <MenuPopup
+      </PopoverTrigger>
+      <PopoverPopup
         align="start"
-        {...(triggerMinWidth !== null
-          ? {
-              style: {
-                minWidth: `${triggerMinWidth}px`,
-              },
-            }
-          : {})}
+        className="border-0 bg-transparent p-0 shadow-none before:hidden [--viewport-inline-padding:0] *:data-[slot=popover-viewport]:p-0"
       >
-        {props.lockedProvider !== null ? (
-          <MenuGroup>
-            <MenuRadioGroup
-              value={props.model}
-              onValueChange={(value) => handleModelChange(props.lockedProvider!, value)}
-            >
-              {props.modelOptionsByProvider[props.lockedProvider].map((modelOption) => (
-                <MenuRadioItem
-                  key={`${props.lockedProvider}:${modelOption.slug}`}
-                  value={modelOption.slug}
-                  onClick={() => setIsMenuOpen(false)}
-                >
-                  {modelOption.name}
-                </MenuRadioItem>
-              ))}
-            </MenuRadioGroup>
-          </MenuGroup>
-        ) : (
-          <>
-            {AVAILABLE_PROVIDER_OPTIONS.map((option) => {
-              const liveProvider = props.providers
-                ? getProviderSnapshot(props.providers, option.value)
-                : undefined;
-              if (liveProvider && liveProvider.status !== "ready") {
-                const unavailableLabel = !liveProvider.enabled
-                  ? "Disabled"
-                  : !liveProvider.installed
-                    ? "Not installed"
-                    : "Unavailable";
-                return (
-                  <MenuItem key={option.value} disabled>
-                    <ProviderIcon
-                      aria-hidden="true"
-                      provider={option.value}
-                      className={cn("size-4 shrink-0 opacity-80")}
-                      fallbackClassName="text-muted-foreground/85"
-                    />
-                    <span>{option.label}</span>
-                    <span className="ms-auto text-[11px] text-muted-foreground/80 uppercase tracking-[0.08em]">
-                      {unavailableLabel}
-                    </span>
-                  </MenuItem>
-                );
-              }
-              return (
-                <MenuSub key={option.value}>
-                  <MenuSubTrigger>
-                    <ProviderIcon
-                      aria-hidden="true"
-                      provider={option.value}
-                      className={cn("size-4 shrink-0")}
-                      fallbackClassName="text-muted-foreground/85"
-                    />
-                    {option.label}
-                  </MenuSubTrigger>
-                  <MenuSubPopup className="[--available-height:min(24rem,70vh)]" sideOffset={4}>
-                    <MenuGroup>
-                      <MenuRadioGroup
-                        value={props.provider === option.value ? props.model : ""}
-                        onValueChange={(value) => handleModelChange(option.value, value)}
-                      >
-                        {props.modelOptionsByProvider[option.value].map((modelOption) => (
-                          <MenuRadioItem
-                            key={`${option.value}:${modelOption.slug}`}
-                            value={modelOption.slug}
-                            onClick={() => setIsMenuOpen(false)}
-                          >
-                            {modelOption.name}
-                          </MenuRadioItem>
-                        ))}
-                      </MenuRadioGroup>
-                    </MenuGroup>
-                  </MenuSubPopup>
-                </MenuSub>
-              );
-            })}
-            {showComingSoonModelOptions ? (
-              <>
-                {UNAVAILABLE_PROVIDER_OPTIONS.length > 0 && <MenuDivider />}
-                {UNAVAILABLE_PROVIDER_OPTIONS.map((option) => {
-                  return (
-                    <MenuItem key={option.value} disabled>
-                      <ProviderIcon
-                        aria-hidden="true"
-                        provider={option.value}
-                        className="size-4 shrink-0 text-muted-foreground/85 opacity-80"
-                      />
-                      <span>{option.label}</span>
-                      <span className="ms-auto text-[11px] text-muted-foreground/80 uppercase tracking-[0.08em]">
-                        Coming soon
-                      </span>
-                    </MenuItem>
-                  );
-                })}
-                {UNAVAILABLE_PROVIDER_OPTIONS.length === 0 && <MenuDivider />}
-                {COMING_SOON_PROVIDER_OPTIONS.map((option) => {
-                  const OptionIcon = option.icon;
-                  return (
-                    <MenuItem key={option.id} disabled>
-                      <OptionIcon aria-hidden="true" className="size-4 shrink-0 opacity-80" />
-                      <span>{option.label}</span>
-                      <span className="ms-auto text-[11px] text-muted-foreground/80 uppercase tracking-[0.08em]">
-                        Coming soon
-                      </span>
-                    </MenuItem>
-                  );
-                })}
-              </>
-            ) : null}
-          </>
-        )}
-      </MenuPopup>
-    </Menu>
+        <ModelPickerContent
+          provider={props.provider}
+          model={props.model}
+          lockedProvider={props.lockedProvider}
+          {...(props.providers && { providers: props.providers })}
+          {...(props.keybindings ? { keybindings: props.keybindings } : {})}
+          modelOptionsByProvider={props.modelOptionsByProvider}
+          terminalOpen={props.terminalOpen ?? false}
+          onRequestClose={() => setIsMenuOpen(false)}
+          onProviderModelChange={handleProviderModelChange}
+        />
+      </PopoverPopup>
+    </Popover>
   );
 });
